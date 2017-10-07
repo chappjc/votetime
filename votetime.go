@@ -41,16 +41,17 @@ func main() {
 
 	log.Println("Wallet connected to node? ", walletInfo.DaemonConnected)
 
-	log.Println("Listing all transactions...")
-	allTxns, err := wcl.ListTransactionsCountFrom("*", 9999999, 0)
+	log.Println("Listing all transaction inputs and outputs...")
+	allTxnIOs, err := wcl.ListTransactionsCountFrom("*", 9999999, 0)
 	if err != nil {
 		log.Fatalf("ListTransactions failed: %v", err)
 	}
-	log.Println("Number of transactions: ", len(allTxns))
 
-	// There are repeats in the list, so gather the unique ones with a map
+	// Transactions may occur multiple times in the list, so gather the unique
+	// transaction hashes with a map. We could just take the result that is
+	// vout[0] of an stakegen, but this easy too.
 	knownVotes := make(map[string]bool)
-	for _, tx := range allTxns {
+	for _, tx := range allTxnIOs {
 		if *tx.TxType == "vote" {
 			knownVotes[tx.TxID] = true
 		}
