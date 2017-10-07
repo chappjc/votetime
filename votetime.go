@@ -15,7 +15,7 @@ import (
 )
 
 var host = flag.String("host", "127.0.0.1:9110", "wallet RPC host:port")
-var user = flag.String("user", "dcrd", "wallet RPC username")
+var user = flag.String("user", "dcrwallet", "wallet RPC username")
 var pass = flag.String("pass", "bananas", "wallet RPC password")
 var cert = flag.String("cert", "dcrwallet.cert", "wallet RPC TLS certificate (when notls=false)")
 var notls = flag.Bool("notls", false, "Disable use of TLS for wallet connection")
@@ -42,15 +42,15 @@ func main() {
 	log.Println("Wallet connected to node? ", walletInfo.DaemonConnected)
 
 	log.Println("Listing all transactions...")
-	allSSGenList, err := wcl.ListTransactionsCountFrom("*", 9999999, 0)
+	allTxns, err := wcl.ListTransactionsCountFrom("*", 9999999, 0)
 	if err != nil {
 		log.Fatalf("ListTransactions failed: %v", err)
 	}
-	log.Println("Number of transactions: ", len(allSSGenList))
+	log.Println("Number of transactions: ", len(allTxns))
 
 	// There are repeats in the list, so gather the unique ones with a map
 	knownVotes := make(map[string]bool)
-	for _, tx := range allSSGenList {
+	for _, tx := range allTxns {
 		if *tx.TxType == "vote" {
 			knownVotes[tx.TxID] = true
 		}
@@ -61,6 +61,7 @@ func main() {
 	waitBlocks := make([]int64, 0, len(knownVotes))
 
 	for txid := range knownVotes {
+		// Get ticket address from previous outpoint of Vin[1] of SSGen
 		voteHash, err := chainhash.NewHashFromStr(txid)
 		if err != nil {
 			log.Printf("Invalid tx hash %s: %v", txid, err)
@@ -72,10 +73,12 @@ func main() {
 			continue
 		}
 
+		// Vin[1] spends the stakesubmission of the ticket purchase
 		prevout := txRaw.MsgTx().TxIn[1].PreviousOutPoint
 		ticketHash := &prevout.Hash
-		ticketBlockOutIndex := prevout.Index
+		ticketTxOutIndex := prevout.Index
 
+		// Get block height and time for the vote
 		txRawVerbose, err := wcl.GetRawTransactionVerbose(voteHash)
 		if err != nil {
 			log.Fatalf("GetRawTransactionVerbose(vote) failed: %v", err)
@@ -83,29 +86,35 @@ func main() {
 		voteHeight := txRawVerbose.BlockHeight
 		voteTime := time.Unix(txRawVerbose.Blocktime, 0)
 
+		// Get block height and time for the ticket
 		prevTxRaw, err := wcl.GetRawTransactionVerbose(ticketHash)
 		if err != nil {
 			log.Fatalf("GetRawTransactionVerbose(ticket) failed: %v", err)
 		}
 
+		// Tickets mature 256 blocks after purchase
 		ticketPurchaseHeight := prevTxRaw.BlockHeight
 		//ticketTime := time.Unix(prevTxRaw.Blocktime, 0)
 		ticketMaturityHeight := ticketPurchaseHeight + int64(activeChainParams.TicketMaturity)
-		ticketPrice := prevTxRaw.Vout[ticketBlockOutIndex].Value
+		// Get time of block at this height
 		ticketMaturityBlockHash, _ := wcl.GetBlockHash(ticketMaturityHeight)
 		ticketMaturityBlock, _ := wcl.GetBlockHeaderVerbose(ticketMaturityBlockHash)
 		ticketMaturityTime := time.Unix(ticketMaturityBlock.Time, 0)
 
+		// Compute time from maturity to vote
 		voteWaitBlocks := voteHeight - ticketMaturityHeight
 		voteWaitSeconds := voteTime.Sub(ticketMaturityTime)
 		voteWaitDays := voteWaitSeconds.Hours() / 24.0
 
+		ticketPrice := prevTxRaw.Vout[ticketTxOutIndex].Value
 		log.Printf("Ticket %s... (%f DCR) mined in block %d, voted %d blocks (%.2f days) after maturity.",
 			prevTxRaw.Txid[:8], ticketPrice, ticketPurchaseHeight, voteWaitBlocks, voteWaitDays)
 
 		waitBlocks = append(waitBlocks, voteWaitBlocks)
 		waitSeconds = append(waitSeconds, voteWaitSeconds.Seconds())
 	}
+
+	// Compute mean wait time in blocks and seconds
 	var avgBlockWait, avgSecondWait float64
 	for iv := range waitBlocks {
 		avgBlockWait += float64(waitBlocks[iv])
