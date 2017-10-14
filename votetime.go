@@ -11,7 +11,7 @@ import (
 
 	"github.com/decred/dcrd/chaincfg"
 	"github.com/decred/dcrd/chaincfg/chainhash"
-	"github.com/decred/dcrrpcclient"
+	"github.com/decred/dcrd/rpcclient"
 )
 
 var host = flag.String("host", "127.0.0.1:9110", "wallet RPC host:port")
@@ -129,7 +129,7 @@ func main() {
 
 // ConnectRPC attempts to create a new websocket connection to a legacy RPC
 // server with the given credentials.
-func ConnectRPC(host, user, pass, cert string, disableTLS bool) (*dcrrpcclient.Client, error) {
+func ConnectRPC(host, user, pass, cert string, disableTLS bool) (*rpcclient.Client, error) {
 	var rpcCerts []byte
 	var err error
 	if !disableTLS {
@@ -146,7 +146,7 @@ func ConnectRPC(host, user, pass, cert string, disableTLS bool) (*dcrrpcclient.C
 			host, user)
 	}
 
-	connCfgDaemon := &dcrrpcclient.ConnConfig{
+	connCfgDaemon := &rpcclient.ConnConfig{
 		Host:         host,
 		Endpoint:     "ws", // websocket
 		User:         user,
@@ -155,7 +155,7 @@ func ConnectRPC(host, user, pass, cert string, disableTLS bool) (*dcrrpcclient.C
 		DisableTLS:   disableTLS,
 	}
 
-	rpcClient, err := dcrrpcclient.New(connCfgDaemon, nil)
+	rpcClient, err := rpcclient.New(connCfgDaemon, nil)
 	if err != nil {
 		return nil, fmt.Errorf("Failed to start dcrwallet RPC client: %s", err.Error())
 	}
