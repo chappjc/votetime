@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"log"
+	"sort"
 	"time"
 
 	"github.com/decred/dcrd/chaincfg"
@@ -23,6 +24,20 @@ var notls = flag.Bool("notls", false, "Disable use of TLS for wallet connection"
 var (
 	activeChainParams = &chaincfg.MainNetParams
 )
+
+type vote struct {
+	voteHash             chainhash.Hash
+	voteHeight           int64
+	voteTime             time.Time
+	ticketPrice          float64
+	ticketHash           chainhash.Hash
+	ticketHeight         int64
+	ticketTime           time.Time
+	ticketMaturityHeight int64
+	ticketMaturityTime   time.Time
+	waitTimeBlocks       int64
+	waitTimeSeconds      int64
+}
 
 func main() {
 	// Parse command line flags
@@ -61,6 +76,8 @@ func main() {
 	waitSeconds := make([]float64, 0, len(knownVotes))
 	waitBlocks := make([]int64, 0, len(knownVotes))
 
+	votes := make([]*vote, 0, len(knownVotes))
+
 	for txid := range knownVotes {
 		// Get ticket address from previous outpoint of Vin[1] of SSGen
 		voteHash, err := chainhash.NewHashFromStr(txid)
@@ -95,7 +112,7 @@ func main() {
 
 		// Tickets mature 256 blocks after purchase
 		ticketPurchaseHeight := prevTxRaw.BlockHeight
-		//ticketTime := time.Unix(prevTxRaw.Blocktime, 0)
+		ticketTime := time.Unix(prevTxRaw.Blocktime, 0)
 		ticketMaturityHeight := ticketPurchaseHeight + int64(activeChainParams.TicketMaturity)
 		// Get time of block at this height
 		ticketMaturityBlockHash, _ := wcl.GetBlockHash(ticketMaturityHeight)
@@ -105,11 +122,25 @@ func main() {
 		// Compute time from maturity to vote
 		voteWaitBlocks := voteHeight - ticketMaturityHeight
 		voteWaitSeconds := voteTime.Sub(ticketMaturityTime)
-		voteWaitDays := voteWaitSeconds.Hours() / 24.0
+		//voteWaitDays := voteWaitSeconds.Hours() / 24.0
 
 		ticketPrice := prevTxRaw.Vout[ticketTxOutIndex].Value
-		log.Printf("Ticket %s... (%f DCR) mined in block %d, voted %d blocks (%.2f days) after maturity.",
-			prevTxRaw.Txid[:8], ticketPrice, ticketPurchaseHeight, voteWaitBlocks, voteWaitDays)
+		// log.Printf("Ticket %s... (%f DCR) mined in block %d, voted %d blocks (%.2f days) after maturity.",
+		// 	prevTxRaw.Txid[:8], ticketPrice, ticketPurchaseHeight, voteWaitBlocks, voteWaitDays)
+
+		votes = append(votes, &vote{
+			voteHash:             *voteHash,
+			voteHeight:           voteHeight,
+			voteTime:             voteTime,
+			ticketPrice:          ticketPrice,
+			ticketHash:           *ticketHash,
+			ticketHeight:         ticketPurchaseHeight,
+			ticketTime:           ticketTime,
+			ticketMaturityHeight: ticketMaturityHeight,
+			ticketMaturityTime:   ticketMaturityTime,
+			waitTimeBlocks:       voteWaitBlocks,
+			waitTimeSeconds:      int64(voteWaitSeconds.Seconds()),
+		})
 
 		waitBlocks = append(waitBlocks, voteWaitBlocks)
 		waitSeconds = append(waitSeconds, voteWaitSeconds.Seconds())
@@ -125,6 +156,15 @@ func main() {
 	avgSecondWait /= float64(len(waitBlocks))
 	log.Printf("Mean wait for %d votes: %.1f blocks, %.2f days.", len(knownVotes),
 		avgBlockWait, avgSecondWait/86400.0)
+
+	sort.Slice(votes, func(i, j int) bool {
+		return votes[i].waitTimeSeconds < votes[j].waitTimeSeconds
+	})
+
+	for _, v := range votes {
+		log.Printf("Ticket %s... (%f DCR) mined in block %d, voted %d blocks (%.2f days) after maturity.",
+			v.ticketHash[:8], v.ticketPrice, v.ticketHeight, v.waitTimeBlocks, v.waitTimeSeconds/86400.0)
+	}
 }
 
 // ConnectRPC attempts to create a new websocket connection to a legacy RPC
