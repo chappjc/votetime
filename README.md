@@ -6,7 +6,10 @@ duration over all of your tickets.
 
 ## Installation
 
-    go get -u github.com/chappjc/votetime
+    git clone https://github.com/chappjc/votetime $GOPATH/src/github.com/chappjc/votetime
+    cd $GOPATH/src/github.com/chappjc/votetime
+    dep ensure
+    go build
 
 If there are errors about a vendor folder in another repository, it is safe to
 delete those folders as they are automatically generated.
